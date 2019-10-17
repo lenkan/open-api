@@ -1,4 +1,8 @@
 import { OpenAPI, OpenAPIV2, OpenAPIV3 } from 'openapi-types';
+
+type ParameterObject = OpenAPIV3.ParameterObject | OpenAPIV2.ParameterObject;
+type ParameterObjects = OpenAPIV3.ParameterObject[] | OpenAPIV2.ParameterObject[];
+
 interface DefaultMap {
   [paramName: string]: any;
 }
@@ -9,7 +13,7 @@ export interface IOpenAPIDefaultSetter {
 
 export interface OpenAPIDefaultSetterArgs {
   loggingKey?: string;
-  parameters: OpenAPIV2.ParameterObject[] | OpenAPIV3.ParameterObject[];
+  parameters: ParameterObjects;
 }
 
 export default class OpenAPIDefaultSetter implements IOpenAPIDefaultSetter {
@@ -41,40 +45,49 @@ export default class OpenAPIDefaultSetter implements IOpenAPIDefaultSetter {
   }
 }
 
-function byDefault(param) {
-  return 'default' in param;
-}
-
-function byLocation(location) {
-  return param => {
+function byLocation(location: string) {
+  return (param: OpenAPIV3.ParameterObject | OpenAPIV2.ParameterObject) => {
     return param.in === location;
   };
 }
 
-function getDefaults(location, parameters) {
-  let defaults;
+function resolveDefaultValue(parameter: OpenAPIV3.ParameterObject | OpenAPIV2.ParameterObject) {
+  if ('default' in parameter) {
+    return parameter.default;
+  }
 
-  parameters
-    .filter(byDefault)
-    .filter(byLocation(location))
-    .forEach(param => {
-      let name = param.name;
+  if('schema' in parameter) {
+    return parameter['schema'] && parameter['schema'].default;
+  }
 
-      if (location === 'header') {
-        name = name.toLowerCase();
-      }
-
-      if (!defaults) {
-        defaults = {};
-      }
-
-      defaults[name] = param.default;
-    });
-
-  return defaults;
+  return undefined;
 }
 
-function setDefaults(obj, defaults) {
+function resolveName(parameter: OpenAPIV3.ParameterObject | OpenAPIV2.ParameterObject): string {
+  if(parameter.in === "header") {
+    return parameter.name.toLowerCase();
+  }
+  return parameter.name;
+}
+
+function getDefaults(location: string, parameters: (OpenAPIV3.ParameterObject | OpenAPIV2.ParameterObject)[]): Record<string, any> {
+  const defaults = parameters
+    .filter(byLocation(location))
+    .reduce((defaults, param) => {
+      const name = resolveName(param);
+
+      const defaultValue = resolveDefaultValue(param);
+      if(defaultValue === undefined) {
+        return defaults;
+      }
+
+      return {...defaults, [name]: defaultValue };
+    }, {});
+
+  return Object.keys(defaults).length ? defaults : undefined
+}
+
+function setDefaults(obj: Record<string, any>, defaults: Record<string, any>) {
   for (const name in defaults) {
     if (!(name in obj)) {
       obj[name] = defaults[name];
